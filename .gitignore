@@ -2,6 +2,9 @@
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,macos,osx,vim,visualstudiocode
 
 ### macOS ###
+# model weight files
+*.pth
+
 # General
 .DS_Store
 .AppleDouble
