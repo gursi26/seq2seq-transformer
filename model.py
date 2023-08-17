@@ -9,7 +9,13 @@ class Seq2SeqTransformer(nn.Module):
 
     def __init__(self, src_dim, tgt_dim, d_model, num_heads, enc_layers, dec_layers):
         super(Seq2SeqTransformer, self).__init__()
+        self.src_dim = src_dim
+        self.tgt_dim = tgt_dim
+        self.d_model = d_model
         self.num_heads = num_heads
+        self.enc_layers = enc_layers
+        self.dec_layers = dec_layers
+        
         self.encoder = TransformerEncoder(
             input_dim=src_dim,
             d_model=d_model,

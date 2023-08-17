@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import DataLoader
 from dataset import EngSpaDataset
+from model import Seq2SeqTransformer
 
 
 class PadCollate:
@@ -37,7 +38,7 @@ def prepare_mask(padding_mask, no_peek_future=False):
     return padding_mask
 
 
-def inference(src_seq, model, dataset, device, max_gen_len=100):
+def inference(src_seq, model, dataset, device, greedy=True, max_gen_len=25):
     src_seq = torch.tensor([dataset.eng2idx[w] for w in dataset.preprocess(src_seq).split()]).unsqueeze(0)
     src_mask = prepare_mask(torch.ones_like(src_seq).type(torch.bool))
     enc_outputs = model.encoder(src_seq.to(device), src_mask.to(device))
@@ -48,13 +49,15 @@ def inference(src_seq, model, dataset, device, max_gen_len=100):
         dec_mask = prepare_mask(torch.ones_like(dec_input.unsqueeze(0)).type(torch.bool), no_peek_future=True)
         out = model.decoder(x=dec_input.unsqueeze(0).to(device), enc_outputs=enc_outputs, enc_mask=src_mask.to(device), dec_mask=dec_mask.to(device)).squeeze(0)[-1]
         out = out.softmax(dim=-1)
-        # dec_input = torch.cat([dec_input, out.multinomial(1).to("cpu")], dim=0)
-        dec_input = torch.cat([dec_input, out.argmax().view(1).to("cpu")], dim=0)
+        if greedy:
+            dec_input = torch.cat([dec_input, out.argmax().view(1).to("cpu")], dim=0)
+        else:
+            dec_input = torch.cat([dec_input, out.multinomial(1).to("cpu")], dim=0)
         i += 1
     return " ".join([dataset.idx2spa[i.item()] for i in dec_input])
 
 
-class TransformerScheduler:
+class TransformerSchedulerOptimizer:
 
     def __init__(self, opt, warmup_steps, d_model):
         self.opt = opt
@@ -62,10 +65,48 @@ class TransformerScheduler:
         self.d_model = d_model
         self.step_num = 0
 
+    def zero_grad(self):
+        self.opt.zero_grad()
+
     def step(self):
+        self.opt.step()
         self.step_num += 1
         for p in self.opt.param_groups:
             p["lr"] = (self.d_model ** (-0.5)) * min(self.step_num ** (-0.5), self.step_num * self.warmup_steps ** (-1.5))
+
+
+def load_state(state_path, device):
+    state = torch.load(state_path, map_location=device)
+    model = Seq2SeqTransformer(
+        src_dim = state["hyperparams"]["src_dim"],
+        tgt_dim = state["hyperparams"]["tgt_dim"],
+        d_model = state["hyperparams"]["d_model"],
+        num_heads = state["hyperparams"]["num_heads"],
+        enc_layers = state["hyperparams"]["enc_layers"],
+        dec_layers = state["hyperparams"]["dec_layers"]
+    )
+    model.load_state_dict(state["weights"])
+    model = model.to(device)
+    scheduler = state["scheduler_optimizer"]
+    epoch = state["epoch"]
+    return model, scheduler, epoch
+
+
+def save_state(save_path, model, scheduler, epoch):    
+    hyperparams = {}
+    hyperparams["src_dim"] = model.src_dim
+    hyperparams["tgt_dim"] = model.tgt_dim
+    hyperparams["d_model"] = model.d_model
+    hyperparams["num_heads"] = model.num_heads
+    hyperparams["enc_layers"] = model.enc_layers
+    hyperparams["dec_layers"] = model.dec_layers
+
+    state = {}
+    state["hyperparams"] = hyperparams
+    state["weights"] = model.state_dict()
+    state["scheduler_optimizer"] = scheduler
+    state["epoch"] = epoch
+    torch.save(state, save_path)
 
 
 def test_padding():
