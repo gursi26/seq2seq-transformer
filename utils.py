@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 from dataset import EngSpaDataset
 from model import Seq2SeqTransformer
+from torch import optim
 
 
 class PadCollate:
@@ -57,56 +58,41 @@ def inference(src_seq, model, dataset, device, greedy=True, max_gen_len=25):
     return " ".join([dataset.idx2spa[i.item()] for i in dec_input])
 
 
-class TransformerSchedulerOptimizer:
+class TransformerScheduler:
 
-    def __init__(self, opt, warmup_steps, d_model):
-        self.opt = opt
+    def __init__(self, warmup_steps, d_model):
         self.warmup_steps = warmup_steps
         self.d_model = d_model
-        self.step_num = 0
 
-    def zero_grad(self):
-        self.opt.zero_grad()
+    def calc_lr(self, step_num):
+        return (self.d_model ** (-0.5)) * min(step_num ** (-0.5), step_num * self.warmup_steps ** (-1.5))
 
-    def step(self):
-        self.opt.step()
-        self.step_num += 1
-        for p in self.opt.param_groups:
-            p["lr"] = (self.d_model ** (-0.5)) * min(self.step_num ** (-0.5), self.step_num * self.warmup_steps ** (-1.5))
+    def step(self, model, optimizer):
+        model.train_step += 1
+        for p in optimizer.param_groups:
+            p["lr"] = self.calc_lr(model.train_step.item())
 
 
 def load_state(state_path, device):
     state = torch.load(state_path, map_location=device)
     model = Seq2SeqTransformer(
-        src_dim = state["hyperparams"]["src_dim"],
-        tgt_dim = state["hyperparams"]["tgt_dim"],
-        d_model = state["hyperparams"]["d_model"],
-        num_heads = state["hyperparams"]["num_heads"],
-        enc_layers = state["hyperparams"]["enc_layers"],
-        dec_layers = state["hyperparams"]["dec_layers"]
-    )
-    model.load_state_dict(state["weights"])
-    model = model.to(device)
-    scheduler = state["scheduler_optimizer"]
-    epoch = state["epoch"]
-    return model, scheduler, epoch
+        src_dim = state["src_dim"].item(),
+        tgt_dim = state["tgt_dim"].item(),
+        d_model = state["d_model"].item(),
+        num_heads = state["num_heads"].item(),
+        enc_layers = state["enc_layers"].item(),
+        dec_layers = state["dec_layers"].item(),
+        warmup_steps= state["warmup_steps"].item(),
+        betas = state["betas"].tolist()
+    ).to(device)
+    model.load_state_dict(state)
+    scheduler = TransformerScheduler(model.warmup_steps.item(), model.d_model.item())
+    opt = optim.Adam(model.parameters(), lr=scheduler.calc_lr(model.train_step.item()), betas=model.betas.tolist())
+    return model, opt, scheduler, model.epoch
 
 
-def save_state(save_path, model, scheduler, epoch):    
-    hyperparams = {}
-    hyperparams["src_dim"] = model.src_dim
-    hyperparams["tgt_dim"] = model.tgt_dim
-    hyperparams["d_model"] = model.d_model
-    hyperparams["num_heads"] = model.num_heads
-    hyperparams["enc_layers"] = model.enc_layers
-    hyperparams["dec_layers"] = model.dec_layers
-
-    state = {}
-    state["hyperparams"] = hyperparams
-    state["weights"] = model.state_dict()
-    state["scheduler_optimizer"] = scheduler
-    state["epoch"] = epoch
-    torch.save(state, save_path)
+def save_state(save_path, model):    
+    torch.save(model.state_dict(), save_path)
 
 
 def test_padding():

@@ -7,14 +7,20 @@ from decoder import TransformerDecoder
 
 class Seq2SeqTransformer(nn.Module):
 
-    def __init__(self, src_dim, tgt_dim, d_model, num_heads, enc_layers, dec_layers):
+    def __init__(self, src_dim, tgt_dim, d_model, num_heads, enc_layers, dec_layers, warmup_steps=4000, betas=[0.9, 0.98]):
         super(Seq2SeqTransformer, self).__init__()
-        self.src_dim = src_dim
-        self.tgt_dim = tgt_dim
-        self.d_model = d_model
-        self.num_heads = num_heads
-        self.enc_layers = enc_layers
-        self.dec_layers = dec_layers
+        self.register_buffer("src_dim", torch.tensor(src_dim, dtype=torch.long))
+        self.register_buffer("tgt_dim", torch.tensor(tgt_dim, dtype=torch.long))
+        self.register_buffer("d_model", torch.tensor(d_model, dtype=torch.long))
+        self.register_buffer("num_heads", torch.tensor(num_heads, dtype=torch.long))
+        self.register_buffer("enc_layers", torch.tensor(enc_layers, dtype=torch.long))
+        self.register_buffer("dec_layers", torch.tensor(dec_layers, dtype=torch.long))
+
+        # optimizer and scheduler info
+        self.register_buffer("train_step", torch.tensor(1, dtype=torch.long))
+        self.register_buffer("epoch", torch.tensor(0, dtype=torch.long))
+        self.register_buffer("warmup_steps", torch.tensor(warmup_steps, dtype=torch.long))
+        self.register_buffer("betas", torch.tensor(betas))
         
         self.encoder = TransformerEncoder(
             input_dim=src_dim,

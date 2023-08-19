@@ -1,5 +1,6 @@
 from torch import nn
 import torch
+import math
 
 
 class QKVLayer(nn.Module):
@@ -10,13 +11,12 @@ class QKVLayer(nn.Module):
         assert mode == "qkv" or mode == "kv" or mode == "q"
         self.len_mode = len(mode)
         self.num_heads, self.head_dim = num_heads, output_dim // num_heads
-        self.qkv_linear = nn.Linear(input_dim, output_dim * self.len_mode, bias=False)
+        self.qkv_linear = nn.Linear(input_dim, output_dim * self.len_mode, bias=True)
 
     def forward(self, x):
         batch_size, seq_len, _ = x.shape
-        qkv = self.qkv_linear(x).reshape(batch_size, seq_len, self.num_heads, self.head_dim * self.len_mode)
-        qkv = qkv.permute(0, 2, 1, 3)
-        return qkv.chunk(self.len_mode, dim=-1)
+        outs = self.qkv_linear(x).chunk(self.len_mode, dim=-1)
+        return [x.view(batch_size, seq_len, self.num_heads, -1).permute(0, 2, 1, 3) for x in outs]
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -27,8 +27,7 @@ class ScaledDotProductAttention(nn.Module):
     # mask must be of shape [batch_size, num_heads, seq_len, seq_len]
     # mask must combine no peek mask and padding mask
     def forward(self, q, k, v, mask):
-        d_k = k.shape[-1]
-        qk = q.matmul(k.transpose(-1, -2)) / d_k
+        qk = q.matmul(k.transpose(-1, -2)) / math.sqrt(q.shape[-1])
         if mask is not None:
             qk = qk.masked_fill(~mask, -torch.inf)
         attn_weights = qk.softmax(dim=-1)
